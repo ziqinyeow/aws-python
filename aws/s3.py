@@ -2,10 +2,10 @@ import os
 import tqdm
 import glob
 import boto3
+import base64
 import typing
 import logging
 from pathlib import Path
-from util.typ import STAGE
 from .err.s3 import errorhandler
 
 
@@ -115,6 +115,7 @@ class S3():
                     file = self.parse_prefix(str(file).replace(cwd, ''), True)
                     if len(upload_only) > 0 and file.replace(path + "/", "").split("/")[0] not in upload_only:
                         continue
+                    path = path.replace(".", "").replace("/", "")
                     if include_root:
                         s3Path = self.parse_prefix(
                             file.replace(path, folder_name), True)
@@ -123,6 +124,17 @@ class S3():
                             file.replace(path, ""), True)
                     s3Path = os.path.join(self.parse_prefix(prefix), s3Path)
                     self.s3c.upload_file(file, bucket, s3Path)
+
+    def upload_base64(self, bucket, prefix, filename: str, base64str: str):
+        obj = self.s3r.Object(bucket, os.path.join(prefix, filename))
+        obj.put(Body=base64.b64decode(base64str))
+        # get bucket location
+        location = self.s3c.get_bucket_location(
+            Bucket=bucket)['LocationConstraint']
+        # get object url
+        object_url = "https://%s.s3-%s.amazonaws.com/%s" % (
+            bucket, location, os.path.join(prefix, filename))
+        print(object_url)
 
     @errorhandler
     def download_file(
@@ -148,7 +160,7 @@ class S3():
         rename_to=""
     ) -> None:
         bucket, prefix = self.parse_s3_uri(s3_uri)
-        self.s3c.download_file(bucket, prefix, save_path, rename_to)
+        self.download_file(bucket, prefix, save_path, rename_to)
 
     @errorhandler
     def download_dir(self, bucket: str, prefix: str, save_path=".") -> None:
@@ -182,19 +194,3 @@ class S3():
     def parse_file_ext(path: str) -> typing.Tuple[str, str]:
         file = os.path.basename(path)
         return os.path.splitext(file)
-
-    ##### Below are functions used specific for NCAI backend #####
-
-    def get_artifact_stage_folder(self, bucket: str, train_id: str, stage: STAGE) -> str:
-        stages = self.list_dirs(bucket, prefix=f"artifacts/{train_id}/")
-        stage_path = [s for s in stages if stage.value in s]
-        assert len(
-            stage_path) == 1, f"There are more than 1 {stage} folder."
-        return stage_path[0]
-
-    def get_artifact_stage_file(self, bucket: str, train_id: str, stage: STAGE, path: str):
-        stage_path = self.get_artifact_stage_folder(
-            bucket, train_id, stage)
-        file_path = os.path.join(stage_path, path)
-        assert self.contains(bucket, file_path)
-        return file_path
