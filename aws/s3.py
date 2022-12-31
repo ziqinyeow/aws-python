@@ -2,7 +2,6 @@ import os
 import tqdm
 import glob
 import boto3
-import base64
 import typing
 import logging
 from pathlib import Path
@@ -18,10 +17,12 @@ logger = logging.getLogger(__name__)
 class S3():
     def __init__(
         self,
+        bucket: str = None,
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", None),
         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", None),
         region_name=os.environ.get("AWS_DEFAULT_REGION", None)
     ):
+        self.bucket = bucket
         # resource
         self.s3r = boto3.resource(
             's3',
@@ -39,8 +40,9 @@ class S3():
         )
 
     @errorhandler
-    def contains(self, bucket: str, prefix: str) -> bool:
+    def contains(self, prefix: str, bucket: str = None) -> bool:
         """Check if prefix folder contains folder/file path"""
+        bucket = bucket or self.bucket
         if len(prefix.split("/")[-1].split(".")) <= 1:
             if prefix.endswith("/"):
                 prefix = prefix[:-1]
@@ -52,21 +54,23 @@ class S3():
         return True
 
     @errorhandler
-    def list_all(self, bucket: str, prefix: str) -> list:
+    def list_all(self, prefix: str, bucket: str = None) -> list:
         """
         List all files recursively within the prefix folder 
         Maximum Len Returns: 1000
         """
+        bucket = bucket or self.bucket
         objects = self.s3c.list_objects(Bucket=bucket, Prefix=prefix)
         paths = [x.get("Key") for x in objects.get("Contents", [])]
         return paths
 
     @errorhandler
-    def list_dirs(self, bucket: str, prefix: str, delimiter="/") -> list:
+    def list_dirs(self, prefix: str, delimiter="/", bucket: str = None) -> list:
         """
         List all folders one level within the prefix folder
         Maximum Len Returns: 1000
         """
+        bucket = bucket or self.bucket
         objects = self.s3c.list_objects(
             Bucket=bucket, Prefix=prefix, Delimiter=delimiter)
         assert objects.get(
@@ -77,11 +81,12 @@ class S3():
     @errorhandler
     def upload_file(
         self,
-        bucket: str,
         prefix: str,
         path: str,
-        filename: str = ""
+        filename: str = "",
+        bucket: str = None
     ) -> None:
+        bucket = bucket or self.bucket
         prefix = self.parse_prefix(prefix)
         if not filename:
             file = os.path.basename(path)
@@ -95,13 +100,14 @@ class S3():
     @errorhandler
     def upload_dir(
         self,
-        bucket: str,
         prefix: str,
         path: str,
         include_root: bool = False,
         folder_name: str = "",
-        upload_only: typing.List = []
+        upload_only: typing.List = [],
+        bucket: str = None
     ):
+        bucket = bucket or self.bucket
         if not folder_name:
             folder_name = self.parse_prefix(path).split("/")[-1]
         path = self.parse_prefix(path)
@@ -125,25 +131,15 @@ class S3():
                     s3Path = os.path.join(self.parse_prefix(prefix), s3Path)
                     self.s3c.upload_file(file, bucket, s3Path)
 
-    def upload_base64(self, bucket, prefix, filename: str, base64str: str):
-        obj = self.s3r.Object(bucket, os.path.join(prefix, filename))
-        obj.put(Body=base64.b64decode(base64str))
-        # get bucket location
-        location = self.s3c.get_bucket_location(
-            Bucket=bucket)['LocationConstraint']
-        # get object url
-        object_url = "https://%s.s3-%s.amazonaws.com/%s" % (
-            bucket, location, os.path.join(prefix, filename))
-        print(object_url)
-
     @errorhandler
     def download_file(
         self,
-        bucket: str,
         prefix: str,
         save_path=".",
-        rename_to=""
-    ) -> None:
+        rename_to="",
+        bucket: str = None
+    ) -> str:
+        bucket = bucket or self.bucket
         filename = os.path.basename(prefix)
         filename = rename_to + \
             os.path.splitext(filename)[-1] if rename_to else filename
@@ -151,6 +147,7 @@ class S3():
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
         self.s3c.download_file(bucket, prefix, path)
+        return os.path.join(path)
 
     @errorhandler
     def download_file_from_uri(
@@ -158,12 +155,13 @@ class S3():
         s3_uri,
         save_path=".",
         rename_to=""
-    ) -> None:
+    ) -> str:
         bucket, prefix = self.parse_s3_uri(s3_uri)
-        self.download_file(bucket, prefix, save_path, rename_to)
+        return self.download_file(prefix, save_path, rename_to, bucket=bucket)
 
     @errorhandler
-    def download_dir(self, bucket: str, prefix: str, save_path=".") -> None:
+    def download_dir(self, prefix: str, save_path=".", bucket: str = None) -> None:
+        bucket = bucket or self.bucket
         bucket = self.s3r.Bucket(bucket)
         for obj in bucket.objects.filter(Prefix=prefix):
             path = os.path.join(save_path, os.path.relpath(obj.key, prefix))
@@ -174,7 +172,7 @@ class S3():
     @errorhandler
     def download_dir_from_uri(self, s3_uri: str, save_path=".") -> None:
         bucket, prefix = self.parse_s3_uri(s3_uri)
-        self.download_dir(bucket, prefix, save_path)
+        self.download_dir(prefix, save_path, bucket=bucket)
 
     @staticmethod
     def parse_s3_uri(s3_uri: str) -> typing.Tuple[str, str]:

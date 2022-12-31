@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 class SQS:
     def __init__(
         self,
+        queue: str = None,
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", None),
         aws_secret_access_key=os.environ.get(
             "AWS_SECRET_ACCESS_KEY", None),
         region_name=os.environ.get("AWS_DEFAULT_REGION", None)
     ):
+        self.queue = queue
         self.sqs = boto3.client(
             'sqs',
             aws_access_key_id=aws_access_key_id,
@@ -31,7 +33,8 @@ class SQS:
         )
 
     @errorhandler
-    def publish(self, queue: str, message: SQSMessage) -> typing.Dict:
+    def publish(self, message: SQSMessage, queue: str = None) -> typing.Dict:
+        queue = queue or self.queue
         message = message.__dict__
 
         if queue.endswith(".fifo"):
@@ -54,7 +57,7 @@ class SQS:
     @errorhandler
     def pool(
         self,
-        queue: str,
+        queue: str = None,
         attribute_names: typing.List[ReceiveAttributeNames] = [
             ReceiveAttributeNames.ALL.value],
         message_attribute_names: typing.List = [],
@@ -63,6 +66,7 @@ class SQS:
         wait_time_seconds: int = 5,
         receive_request_attempt_id: str = uuid.uuid1().hex
     ) -> typing.List[typing.Union[ReturnedSQSMessages, None]]:
+        queue = queue or self.queue
         resp = self.sqs.receive_message(
             QueueUrl=queue,
             AttributeNames=attribute_names,
@@ -74,6 +78,7 @@ class SQS:
         )
         return resp.get("Messages", [])
 
+    @staticmethod
     @errorhandler
     def create_queue(
         self,

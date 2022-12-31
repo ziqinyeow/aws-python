@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 class DYDB:
     def __init__(
         self,
+        table = None,
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", None),
         aws_secret_access_key=os.environ.get(
             "AWS_SECRET_ACCESS_KEY", None),
         region_name=os.environ.get("AWS_DEFAULT_REGION", None)
     ):
+        self.table = table
         self.dydb = boto3.client(
             'dynamodb',
             aws_access_key_id=aws_access_key_id,
@@ -26,21 +28,25 @@ class DYDB:
             region_name=region_name
         )
 
+    @staticmethod
     @errorhandler
-    def exists(self, table) -> None:
+    def exists(self, table: str = None) -> None:
+        table = table or self.table
         self.dydb.describe_table(
             TableName=table
         )
 
     @errorhandler
-    def get(self, table: str, key: typing.Dict) -> typing.Dict:
+    def get(self, key: typing.Dict, table: str = None) -> typing.Dict:
+        table = table or self.table
         return self.dydb.get_item(
             TableName=table,
             Key=self.mapper(key)
         )['Item']
 
     @errorhandler
-    def delete(self, table: str, key: dict) -> None:
+    def delete(self, key: dict, table: str = None) -> None:
+        table = table or self.table
         self.dydb.delete_item(
             TableName=table,
             Key=self.mapper(key)
@@ -48,15 +54,15 @@ class DYDB:
 
     @errorhandler
     def create(self, table: str, data: typing.Dict) -> None:
-        print(self.mapper(data))
         self.dydb.put_item(
             TableName=table,
             Item=self.mapper(data)
         )
 
     @errorhandler
-    def update(self, table: str, key: typing.Dict, data: typing.Dict) -> None:
+    def update(self, key: typing.Dict, data: typing.Dict, table: str = None) -> None:
         """Add if don't have and merge if have (list append not supported yet)"""
+        table = table or self.table
         try:
             update_expression, \
                 expression_attribute_names, \
@@ -129,15 +135,15 @@ class DYDB:
         if merge:
             flattened = self.__flatten(data)
             for i, (k, v) in enumerate(flattened.items()):
-                uid = uuid.uuid1().hex
-                update_expression += f"{k} = :{uid}"
+                # uid = uuid.uuid1().hex
+                update_expression += f"{k} = :{k}"
                 if i < len(flattened) - 1:
                     update_expression += ", "
                 for sep in k.split("."):
                     if "#" not in sep:
                         continue
                     expression_attribute_names[f"{sep}"] = sep.replace("#", "")
-                expression_attribute_values[f":{uid}"] = self.mapper(
+                expression_attribute_values[f":{k}"] = self.mapper(
                     v, include=True)
         else:
             for i, (k, v) in enumerate(data.items()):
